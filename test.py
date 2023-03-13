@@ -2,6 +2,7 @@ import turtle,random,time,csv
 from tensorforce import Agent, Environment, Runner
 import numpy as np
 import os
+import math
 
 class Ant(turtle.Turtle):
     def __init__(self):
@@ -11,7 +12,8 @@ class Ant(turtle.Turtle):
         self.penup()
         self.type = "insect"
         self.diet = "all"
-        self.food_dist = 20
+        self.eat_dist = 20
+        self.vision_dist = 200
         scale = 0.075
         with open('coordinator.csv', newline='') as f:
             reader = csv.reader(f)
@@ -73,8 +75,12 @@ class AntEnvironment(Environment):
         return super().num_actors()
 
     def reset(self):
-        x = random.randint(-self.width/2,self.width/2)
-        y = random.randint(-self.width/2,self.height/2)
+        min_distance_from_center = 100
+        while True:
+            x = random.randint(-self.width/2, self.width/2)
+            y = random.randint(-self.height/2, self.height/2)
+            if abs(x) >= min_distance_from_center and abs(y) >= min_distance_from_center:
+                break
         self.foods[0].goto(x,y)
         self.ants[0].home()
         self.score=0
@@ -113,13 +119,19 @@ class AntEnvironment(Environment):
         states = np.array([antx,anty,anth,dist])
         return states
 
-    def checkFood(self,ant):
+    def checkFood(self,ant:Ant):
         reward = 0
+        food:Food
         for food in self.foods:
             dist = ant.distance(food)
-            reward+=-0.00001*dist**2
-            if dist<ant.food_dist:
-                reward+=10000
+            reward += -0.001*dist
+            dx = food.xcor() - ant.xcor()
+            dy = food.ycor() - ant.ycor()
+            if dist < ant.vision_dist:
+                angle = math.degrees(math.atan2(dy, dx)) - ant.heading()
+                reward += 0.1 * math.cos(math.radians(angle))
+            if dist<ant.eat_dist:
+                reward+=1000
                 x = random.randint(-self.width/2,self.width/2)
                 y = random.randint(-self.width/2,self.height/2)
                 food.goto(x,y)
@@ -164,41 +176,29 @@ if __name__=="__main__":
         objective='policy_gradient', 
         reward_estimation=dict(
             horizon=20,
-        ),
+            ),
         state_preprocessing=dict(
             type='sequence',
             length = 4
-        ),
+            ),
     )
-    # tfagent = Agent.create(
-    #     agent='tensorforce', environment=environment, update=64,
-    #     optimizer=dict(optimizer='adam', learning_rate=1e-3),
-    #     objective='policy_gradient', reward_estimation=dict(horizon=20)
-    # )
-    dqnagent = Agent.create(
-        agent='dqn', environment=environment, memory=10000, batch_size=10
+    tfagent = Agent.create(
+        agent='tensorforce', environment=environment, update=64,
+        optimizer=dict(optimizer='adam', learning_rate=1e-3),
+        objective='policy_gradient',
+        reward_estimation=dict(
+            horizon=20
+            )
     )
+
     environment.delay = 0
-    # runner = Runner(
-    #     agent=tfagent,
-    #     environment=environment,
-    # )
-    # runner.run(num_episodes=2000)
-    # path = os.path.dirname(__file__)
+
     environment.episodes=0
-    # print(os.path.dirname(__file__)+"/agents/"+"checkpoint")
-    loadedAgent = Agent.load(
-        os.path.dirname(__file__)+"/agents/",
-        "best-model.json",
-        agent=os.path.dirname(__file__)+"/agents/"+"best-model.json"
-    )
-    # loadedAge
-    # loadedAgent.load_model(os.path.dirname(__file__)+"/agents/"+"checkpoint")
-    
-    environment.delay = 0.02
+
     runner = Runner(
-        agent=loadedAgent,
+        agent=tfagent,
         environment=environment,
     )
+
     environment.max_episode_timesteps = 10000
     runner.run(num_episodes=100)
